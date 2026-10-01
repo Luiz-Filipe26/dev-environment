@@ -114,7 +114,7 @@ if [[ ! -d $ts ]]; then
 fi
 [[ $("$node/bin/node" --version) == "v$NODE_VERSION" ]] || fail 'Node version mismatch.'
 "$nvim/bin/nvim" --version | sed -n '1p' | grep -Fx "NVIM v$NVIM_VERSION" >/dev/null || fail 'NeoVim version mismatch.'
-"$ts/tree-sitter" --version | grep -F "tree-sitter $TS_VERSION " >/dev/null || fail 'Tree-sitter version mismatch.'
+"$ts/tree-sitter" --version | grep -Fx "tree-sitter $TS_VERSION" >/dev/null || fail 'Tree-sitter version mismatch.'
 if [[ ! -x $codex/bin/codex ]]; then
     [[ ! -e $codex ]] || fail "Partial Codex installation: remove or inspect $codex manually."
     # Official npm package, private prefix. No production Node/npm global changes.
