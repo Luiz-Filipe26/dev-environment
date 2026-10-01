@@ -51,10 +51,10 @@ exec 9>"$state/bootstrap.lock"
 flock -n 9 || fail 'Another bootstrap is running.'
 temp=$(mktemp -d)
 trap 'rm -rf -- "$temp"' EXIT
-sudo -v
+sudo -n true || fail 'Non-interactive sudo is required; no password prompt will be opened.'
 # Request reporting instead of automatic service restarts; no distribution upgrade.
-sudo env NEEDRESTART_MODE=l apt-get update
-sudo env NEEDRESTART_MODE=l apt-get install -y --no-install-recommends --no-upgrade "${packages[@]}"
+sudo -n env NEEDRESTART_MODE=l apt-get update
+sudo -n env NEEDRESTART_MODE=l apt-get install -y --no-install-recommends --no-upgrade "${packages[@]}"
 
 swap_total() { swapon --show --bytes --noheadings --output SIZE | awk '{n += $1} END {printf "%.0f\n", n}'; }
 swap_target=$((4 * 1024 * 1024 * 1024))
@@ -72,11 +72,11 @@ if (( swap_current < swap_target - 16 * 1024 * 1024 )); then
     if awk -v p="$swap_file" '$1 == p {found=1} END {exit !found}' /etc/fstab; then
         fail 'Dedicated swap entry already in fstab; inspect manually.'
     fi
-    sudo install -m 600 /dev/null "$swap_file"
-    sudo dd if=/dev/zero of="$swap_file" bs=1M count="$swap_mib" status=progress conv=fsync
-    sudo mkswap "$swap_file"
-    sudo swapon "$swap_file"
-    printf '%s none swap sw 0 0\n' "$swap_file" | sudo tee -a /etc/fstab >/dev/null
+    sudo -n install -m 600 /dev/null "$swap_file"
+    sudo -n dd if=/dev/zero of="$swap_file" bs=1M count="$swap_mib" status=progress conv=fsync
+    sudo -n mkswap "$swap_file"
+    sudo -n swapon "$swap_file"
+    printf '%s none swap sw 0 0\n' "$swap_file" | sudo -n tee -a /etc/fstab >/dev/null
 fi
 
 download() {
