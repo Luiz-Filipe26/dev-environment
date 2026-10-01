@@ -56,13 +56,35 @@ sudo -n true || fail 'Non-interactive sudo is required; no password prompt will 
 sudo -n env NEEDRESTART_MODE=l apt-get update
 sudo -n env NEEDRESTART_MODE=l apt-get install -y --no-install-recommends --no-upgrade "${packages[@]}"
 
-swap_total() { swapon --show --bytes --noheadings --output SIZE | awk '{n += $1} END {printf "%.0f\n", n}'; }
-swap_target=$((4 * 1024 * 1024 * 1024))
-swap_file=/swapfile-oracle-dev
-swap_current=$(swap_total)
-if (( swap_current < swap_target - 16 * 1024 * 1024 )); then
-    # Never replace, resize or deactivate an existing swap file.
-    [[ ! -e $swap_file && ! -L $swap_file ]] || fail "$swap_file already exists; inspect it manually."
+configure_swap() {
+    local swap_target=$((4 * 1024 * 1024 * 1024))
+    local tolerance=$((16 * 1024 * 1024))
+    local swap_file=/swapfile-oracle-dev
+    local snapshot swap_current active_size metadata owner mode file_size fs swap_mib available
+    # /proc reports unformatted KiB, independently of swapon's table/locale.
+    snapshot=$(cat /proc/swaps)
+    swap_current=$(awk 'NR > 1 {n += $3} END {printf "%.0f\n", n * 1024}' <<<"$snapshot")
+
+    if [[ -e $swap_file || -L $swap_file ]]; then
+        [[ -f $swap_file && ! -L $swap_file ]] || fail "$swap_file is not a regular managed swap file."
+        active_size=$(awk -v p="$swap_file" 'NR > 1 && $1 == p && $2 == "file" {printf "%.0f\n", $3 * 1024}' <<<"$snapshot")
+        if [[ ! $active_size =~ ^[0-9]+$ ]] || (( active_size <= 0 )); then
+            fail "$swap_file exists but is not active swap; inspect it manually."
+        fi
+        metadata=$(stat -c '%u %a %s' "$swap_file")
+        read -r owner mode file_size <<<"$metadata"
+        [[ $owner == 0 && $mode == 600 ]] || fail "$swap_file has unexpected ownership or permissions."
+        (( file_size >= active_size && file_size - active_size < tolerance )) || fail "$swap_file has inconsistent file/active sizes."
+        [[ $(sudo -n blkid -p -s TYPE -o value "$swap_file") == swap ]] || fail "$swap_file lacks a valid swap signature."
+        # The original bootstrap had no marker: recognize its dedicated path,
+        # root:600 file, active swap signature and exactly one generated entry.
+        awk -v p="$swap_file" '$1 == p {n++; if ($2 != "none" || $3 != "swap" || $4 != "sw" || $5 != "0" || $6 != "0") bad=1} END {exit !(n == 1 && !bad)}' /etc/fstab || fail "$swap_file has missing, duplicate or unexpected fstab configuration."
+        (( swap_current >= swap_target - tolerance )) || fail 'Managed swap is active, but total swap is below target; inspect manually without resizing it.'
+        printf '%s\n' 'Managed swap already active and configured; preserving it.'
+        return
+    fi
+
+    (( swap_current < swap_target - tolerance )) || return 0
     fs=$(findmnt -n -o FSTYPE -T /)
     [[ $fs == ext4 || $fs == xfs ]] || fail 'Swap creation supports ext4/xfs only.'
     swap_mib=$(((swap_target - swap_current + 1048575) / 1048576))
@@ -77,7 +99,8 @@ if (( swap_current < swap_target - 16 * 1024 * 1024 )); then
     sudo -n mkswap "$swap_file"
     sudo -n swapon "$swap_file"
     printf '%s none swap sw 0 0\n' "$swap_file" | sudo -n tee -a /etc/fstab >/dev/null
-fi
+}
+configure_swap
 
 download() {
     local url=$1 sha=$2 output=$3
